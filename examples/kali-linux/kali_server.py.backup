@@ -104,22 +104,145 @@ def is_safe_command(command: str) -> bool:
             return False
     return True
 
-def setup_kali_container(container_name: str) -> str:
-    """Setup Kali container - just start it from the base image which has all tools"""
+def build_ready_image() -> bool:
+    """Build a ready-to-use Kali image with all tools pre-installed"""
     try:
-        # Use KALI_BASE_IMAGE which is kali-security-mcp-server:latest with all tools already installed
-        logger.info(f"Starting Kali container: {container_name}")
+        logger.info("Building ready-to-use Kali image with all tools...")
         
-        # Start container with necessary capabilities for security tools
-        start_cmd = f"docker run -d --name {container_name} --rm --cap-add=NET_RAW --cap-add=NET_ADMIN {KALI_BASE_IMAGE} tail -f /dev/null"
+        # Check if image already exists
+        check_cmd = f"docker images -q {KALI_READY_IMAGE}"
+        result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            logger.info(f"Ready image {KALI_READY_IMAGE} already exists")
+            return True
+        
+        # Create temporary container for building
+        build_container = f"{CONTAINER_PREFIX}-build"
+        
+        # Clean up any existing build container
+        cleanup_cmd = f"docker stop {build_container} 2>/dev/null || true"
+        subprocess.run(cleanup_cmd, shell=True, capture_output=True, timeout=10)
+        
+        # Start container
+        start_cmd = f"docker run -d --name {build_container} {KALI_BASE_IMAGE} tail -f /dev/null"
+        result = subprocess.run(start_cmd, shell=True, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            logger.error(f"Failed to start build container: {result.stderr}")
+            return False
+        
+        time.sleep(3)
+        
+        # Setup and install tools
+        setup_cmd = f'''docker exec {build_container} bash -c '
+export DEBIAN_FRONTEND=noninteractive
+export TZ=UTC
+
+# Update sources.list
+echo "deb http://archive-4.kali.org/kali kali-rolling main non-free contrib" > /etc/apt/sources.list
+echo "deb-src http://archive-4.kali.org/kali kali-rolling main non-free contrib" >> /etc/apt/sources.list
+
+apt-get update -qq
+apt-get install -y -qq ca-certificates apt-transport-https
+
+echo "deb https://archive-4.kali.org/kali kali-rolling main non-free contrib" > /etc/apt/sources.list
+echo "deb-src https://archive-4.kali.org/kali kali-rolling main non-free contrib" >> /etc/apt/sources.list
+
+apt-get update -qq
+apt-get install -y -qq -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" kali-linux-everything || true
+
+apt-get clean -qq
+rm -rf /var/lib/apt/lists/*
+' '''
+        
+        logger.info("Installing kali-linux-everything (this will take a while)...")
+        setup_result = subprocess.run(setup_cmd, shell=True, capture_output=True, text=True, timeout=1800)
+        
+        if setup_result.returncode != 0:
+            logger.warning(f"Installation had warnings but continuing")
+        
+        # Commit the container as an image
+        commit_cmd = f"docker commit {build_container} {KALI_READY_IMAGE}"
+        commit_result = subprocess.run(commit_cmd, shell=True, capture_output=True, text=True, timeout=60)
+        
+        if commit_result.returncode != 0:
+            logger.error(f"Failed to commit image: {commit_result.stderr}")
+            return False
+        
+        # Clean up build container
+        cleanup_cmd = f"docker stop {build_container}"
+        subprocess.run(cleanup_cmd, shell=True, capture_output=True, timeout=10)
+        
+        logger.info(f"Successfully built ready image: {KALI_READY_IMAGE}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error building ready image: {e}")
+        return False
+
+def setup_kali_container(container_name: str) -> str:
+    """Setup Kali container with proper repositories and tools"""
+    try:
+        # Build or use ready image
+        if not SKIP_BUILD and not build_ready_image():
+            logger.warning("Failed to build ready image, using base image")
+            use_image = KALI_BASE_IMAGE
+        else:
+            use_image = KALI_READY_IMAGE
+        
+        # Start container
+        start_cmd = f"docker run -d --name {container_name} --rm {use_image} tail -f /dev/null"
         result = subprocess.run(start_cmd, shell=True, capture_output=True, text=True, timeout=30)
         
         if result.returncode != 0:
             return f"❌ Error starting container: {result.stderr}"
         
         # Wait for container to be ready
-        time.sleep(2)
-        logger.info(f"Container {container_name} ready with all tools")
+        time.sleep(3)
+        
+        # Update sources.list to use Kali archive-4 mirror and install tools non-interactively
+        sources_cmd = f'''docker exec {container_name} bash -c '
+# Set non-interactive environment
+export DEBIAN_FRONTEND=noninteractive
+export TZ=UTC
+
+# Update sources.list to use HTTP initially
+echo "deb http://archive-4.kali.org/kali kali-rolling main non-free contrib" > /etc/apt/sources.list
+echo "deb-src http://archive-4.kali.org/kali kali-rolling main non-free contrib" >> /etc/apt/sources.list
+
+# Update package lists
+apt-get update -qq
+
+# Install ca-certificates first for HTTPS support
+apt-get install -y -qq ca-certificates apt-transport-https
+
+# Switch to HTTPS mirror
+echo "deb https://archive-4.kali.org/kali kali-rolling main non-free contrib" > /etc/apt/sources.list
+echo "deb-src https://archive-4.kali.org/kali kali-rolling main non-free contrib" >> /etc/apt/sources.list
+
+# Update again with HTTPS
+apt-get update -qq
+
+# Install kali-linux-everything non-interactively with minimal output
+apt-get install -y -qq -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" kali-linux-everything || true
+
+# Clean up apt cache to reduce container size
+apt-get clean -qq
+rm -rf /var/lib/apt/lists/*
+' '''
+        
+        logger.info(f"Setting up Kali container with tools: {container_name}")
+        if use_image == KALI_BASE_IMAGE:
+            logger.info("Installing kali-linux-everything (this will take a while)...")
+            setup_result = subprocess.run(sources_cmd, shell=True, capture_output=True, text=True, timeout=1800)  # 30 minutes for full installation
+            
+            if setup_result.returncode != 0:
+                logger.warning(f"Container setup had issues: {setup_result.stderr}")
+                # Continue anyway as some tools may have been installed
+            else:
+                logger.info("Kali container setup completed successfully")
+        else:
+            logger.info("Using pre-built ready image")
         
         return ""
         
@@ -303,8 +426,8 @@ def discover_kali_tools(force_refresh: bool = False) -> dict:
     
     try:
         # Scan the LOCAL filesystem instead of spawning containers
-        # Method 1: Get all executable binaries from PATH (focusing on main bins, not /opt to avoid clutter)
-        get_bins_cmd = "find /usr/bin /usr/sbin /usr/local/bin -type f -executable 2>/dev/null | sort"
+        # Method 1: Get all executable binaries from PATH
+        get_bins_cmd = "find /usr/bin /usr/sbin /opt /usr/local/bin -type f -executable 2>/dev/null | sort"
         result = subprocess.run(get_bins_cmd, shell=True, capture_output=True, text=True, timeout=60)
         binaries = result.stdout.strip().split('\n') if result.returncode == 0 else []
         
@@ -358,12 +481,13 @@ def discover_kali_tools(force_refresh: bool = False) -> dict:
         for category in category_keywords.keys():
             categories[category] = []
         
-        # Process all discovered tools
+        # Process all discovered tools with enhanced metadata
         all_discovered_tools = set()
         processed_tools = 0
+        max_tools_to_process = 500  # Limit to prevent excessive processing time
         
-        # Process all binaries
-        for binary in binaries:
+        # Process binaries with metadata extraction
+        for binary in binaries[:max_tools_to_process]:
             if binary.strip():
                 tool_name = binary.split('/')[-1]
                 all_discovered_tools.add(tool_name)
@@ -381,14 +505,46 @@ def discover_kali_tools(force_refresh: bool = False) -> dict:
                         categorized = True
                         break
                 
-                # If not categorized, skip (don't add to System Services to reduce clutter)
+                # If not categorized by keywords, skip capability detection for performance
+                # (capability detection requires running each tool which is slow)
+                    if capabilities:
+                        # Categorize based on detected capabilities
+                        cap_mapping = {
+                            "network_scan": "Information Gathering",
+                            "web_testing": "Web Application Analysis", 
+                            "sql_injection": "Database Assessment",
+                            "password_cracking": "Password Attacks",
+                            "wireless": "Wireless Attacks",
+                            "forensics": "Forensics",
+                            "reverse_engineering": "Reverse Engineering",
+                            "exploitation": "Exploitation Tools",
+                            "sniffing": "Sniffing & Spoofing",
+                            "vulnerability": "Vulnerability Analysis"
+                        }
+                        
+                        for capability in capabilities:
+                            if capability in cap_mapping:
+                                category = cap_mapping[capability]
+                                if category not in categories:
+                                    categories[category] = []
+                                categories[category].append(tool_name)
+                                tools[tool_name] = category
+                                categorized = True
+                                break
+                
+                # If still not categorized, add to System Services
+                if not categorized and tool_name not in ["python3", "python", "perl", "ruby", "bash", "sh", "rm", "chmod", "sudo"]:
+                    if "System Services" not in categories:
+                        categories["System Services"] = []
+                    categories["System Services"].append(tool_name)
+                    tools[tool_name] = "System Services"
         
         # Process desktop applications
         for desktop_file in desktop_files:
             if desktop_file.strip():
                 try:
                     # Extract Exec line from desktop file
-                    exec_cmd = f"grep '^Exec=' '{desktop_file}' 2>/dev/null | cut -d= -f2 | cut -d' ' -f1"
+                    exec_cmd = f"docker exec {discovery_container} grep '^Exec=' '{desktop_file}' 2>/dev/null | cut -d= -f2 | cut -d' ' -f1"
                     exec_result = subprocess.run(exec_cmd, shell=True, capture_output=True, text=True, timeout=10)
                     
                     if exec_result.returncode == 0:
@@ -447,6 +603,10 @@ def discover_kali_tools(force_refresh: bool = False) -> dict:
         # Add metadata to discovery info
         discovery_info["tools_processed"] = processed_tools
         discovery_info["tools_with_metadata"] = len(metadata)
+        
+        # Clean up discovery container
+        cleanup_cmd = f"docker stop {discovery_container}"
+        subprocess.run(cleanup_cmd, shell=True, capture_output=True, timeout=10)
         
         # Update global cache
         AVAILABLE_TOOLS = tools
@@ -661,19 +821,24 @@ async def container_status() -> str:
         if docker_version.returncode == 0:
             output += f"\n**Docker:** {docker_version.stdout.strip()}"
         
-        # Check base image
+        # Check both base and ready images
         base_check = subprocess.run(f"docker images {KALI_BASE_IMAGE}", shell=True, capture_output=True, text=True)
+        ready_check = subprocess.run(f"docker images {KALI_READY_IMAGE}", shell=True, capture_output=True, text=True)
         
-        if base_check.returncode == 0:
-            output += f"\n**Kali Image:** Available ({KALI_BASE_IMAGE}) ✅"
+        if ready_check.returncode == 0:
+            output += f"\n**Kali Ready Image:** Available ({KALI_READY_IMAGE}) ✅"
+        elif base_check.returncode == 0:
+            output += f"\n**Kali Base Image:** Available ({KALI_BASE_IMAGE}) - will build ready image"
         else:
-            output += f"\n**Kali Image:** Not found - will pull on first use"
+            output += f"\n**Kali Images:** Not found - will pull on first use"
         
         # Configuration info
         output += f"\n\n**Configuration:**\n"
         output += f"- Timeout: {TARGET_TIMEOUT}s\n"
         output += f"- Container Prefix: {CONTAINER_PREFIX}\n"
         output += f"- Base Image: {KALI_BASE_IMAGE}\n"
+        output += f"- Ready Image: {KALI_READY_IMAGE}\n"
+        output += f"- Skip Build: {SKIP_BUILD}\n"
         output += f"- Discovered Tools: {len(AVAILABLE_TOOLS)}\n"
         
         # Add discovery statistics
@@ -823,7 +988,6 @@ async def install_tool(package_name: str = "", tool_type: str = "apt") -> str:
     if sanitized_type not in valid_types:
         return f"❌ Error: Invalid tool type. Valid types: {', '.join(valid_types)}"
     
-    container_name = None
     try:
         # Create installation container
         container_name = f"{CONTAINER_PREFIX}-install-{os.getpid()}-{int(time.time())}"
@@ -851,8 +1015,6 @@ async def install_tool(package_name: str = "", tool_type: str = "apt") -> str:
             install_cmd = f"go install {sanitized_package}"
         elif sanitized_type == "npm":
             install_cmd = f"npm install -g {sanitized_package}"
-        else:
-            return f"❌ Error: Unsupported tool type: {sanitized_type}"
         
         # Execute installation
         exec_cmd = f"docker exec {container_name} {install_cmd}"
@@ -866,15 +1028,15 @@ async def install_tool(package_name: str = "", tool_type: str = "apt") -> str:
             timeout=300  # 5 minute timeout for installation
         )
         
-        # Commit the container to update the base image
+        # Commit the container as new ready image to persist the installation
         if result.returncode == 0:
-            commit_cmd = f"docker commit {container_name} {KALI_BASE_IMAGE}"
+            commit_cmd = f"docker commit {container_name} {KALI_READY_IMAGE}"
             commit_result = subprocess.run(commit_cmd, shell=True, capture_output=True, text=True, timeout=60)
             
             if commit_result.returncode == 0:
                 output += f"✅ **Successfully installed {sanitized_package}**\n\n"
                 output += f"**Installation output:**\n```\n{result.stdout}\n```\n"
-                output += f"\n✅ Changes saved to {KALI_BASE_IMAGE}\n"
+                output += f"\n✅ Changes saved to {KALI_READY_IMAGE}\n"
                 output += f"💡 **Tip:** Run `refresh_tool_discovery` to find newly installed tools"
             else:
                 output += f"⚠️ **Tool installed but failed to save changes**\n"
