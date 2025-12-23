@@ -437,9 +437,9 @@ warmup_tool_discovery() {
   docker exec "$warmup_container" python -c "
 import sys
 sys.path.insert(0, '/app')
-from kali_server import discover_kali_tools, logger
-logger.info('Starting tool discovery warm-up...')
-result = discover_kali_tools(force_refresh=True)
+from kali_server import discover_kali_tools_optimized, logger
+logger.info('Starting OPTIMIZED tool discovery warm-up...')
+result = discover_kali_tools_optimized(force_refresh=True)
 logger.info(f'Discovered {len(result[\"tools\"])} tools in {len(result[\"categories\"])} categories')
 logger.info('Warm-up complete!')
 print(f'WARMUP_COMPLETE:{len(result[\"tools\"])}')

@@ -1,0 +1,2 @@
+FROM kali-security-mcp-server:latest
+COPY kali_server.py /app/kali_server.py
