@@ -395,7 +395,8 @@ def detect_tool_capabilities(tool_name: str, discovery_container: str) -> list:
 
 def discover_kali_tools(force_refresh: bool = False) -> dict:
     """Dynamically discover all available tools in Kali Linux using multiple methods"""
-    global LAST_DISCOVERY_TIME
+    # ALL global declarations MUST be at the top
+    global LAST_DISCOVERY_TIME, AVAILABLE_TOOLS, TOOL_CATEGORIES, DISCOVERY_INFO, TOOL_METADATA
     
     current_time = time.time()
     
@@ -415,7 +416,6 @@ def discover_kali_tools(force_refresh: bool = False) -> dict:
         cached = load_cached_tools()
         if cached:
             # Update global variables
-            global AVAILABLE_TOOLS, TOOL_CATEGORIES, DISCOVERY_INFO, TOOL_METADATA
             AVAILABLE_TOOLS = cached.get("tools", {})
             TOOL_CATEGORIES = cached.get("categories", {})
             DISCOVERY_INFO = cached.get("discovery_info", {})
@@ -628,7 +628,6 @@ def discover_kali_tools(force_refresh: bool = False) -> dict:
         subprocess.run(cleanup_cmd, shell=True, capture_output=True, timeout=10)
         
         # Update global cache
-        global AVAILABLE_TOOLS, TOOL_CATEGORIES, DISCOVERY_INFO, TOOL_METADATA, LAST_DISCOVERY_TIME
         AVAILABLE_TOOLS = tools
         TOOL_CATEGORIES = categories
         DISCOVERY_INFO = discovery_info

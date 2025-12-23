@@ -15,6 +15,11 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+export SKIP_BASE_BUILD=false
+export SKIP_READY_BUILD=false
+export SKIP_WARMUP=false
+export FORCE_REBUILD=false
+export CLEAN_SETUP=false
 # Configuration variables
 KALI_BASE_IMAGE="kalilinux/kali-rolling"
 KALI_READY_IMAGE="kali-mcp-ready"
@@ -100,130 +105,37 @@ cleanup_all() {
 
 check_existing_setup() {
   print_status "Checking existing setup state..."
-
-  local base_exists=false
-  local ready_exists=false
-  local cache_exists=false
-  local catalog_exists=false
-  local server_enabled=false
-
   # Check base MCP server image
   if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "kali-security-mcp-server:latest"; then
     print_success "✓ Base image exists: kali-security-mcp-server:latest"
-    base_exists=true
   else
     print_warning "✗ Base image not found"
   fi
-
   # Check ready image (with tools installed)
   if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "kali-mcp-ready:latest"; then
     print_success "✓ Ready image exists: kali-mcp-ready:latest"
-    ready_exists=true
   else
-    print_warning "✗ Ready image not found"
+    print_warning "✗ Ready image not found - will build during warm-up"
   fi
-
   # Check if tool discovery cache exists
   if [ -f "$HOME_DIR/.docker/mcp/kali-tools-cache.json" ]; then
     print_success "✓ Tool discovery cache found"
-    cache_exists=true
   else
-    print_warning "✗ Tool discovery cache not found"
+    print_warning "✗ Tool discovery cache not found - will discover"
   fi
-
   # Check if catalog exists
-  if [ -f "$CATALOGS_DIR/kali-security.yaml" ]; then
-    print_success "✓ Catalog file exists"
-    catalog_exists=true
+  if docker mcp catalog show "$KALI_CATALOG_NAME" &>/dev/null; then
+    print_success "✓ Catalog imported in Docker MCP"
   else
-    print_warning "✗ Catalog file not found"
+    print_warning "✗ Catalog not imported - will create"
   fi
-
   # Check if server is enabled
   if docker mcp server ls 2>/dev/null | grep -q "kali-security"; then
     print_success "✓ Server is enabled"
-    server_enabled=true
   else
-    print_warning "✗ Server not enabled"
+    print_warning "✗ Server not enabled - will enable"
   fi
-
   echo ""
-
-  # Decision logic
-  if [ "$FORCE_REBUILD" = true ]; then
-    print_warning "Force rebuild requested - will rebuild everything"
-    export SKIP_BASE_BUILD=false
-    export SKIP_READY_BUILD=false
-    export SKIP_WARMUP=false
-    return 0
-  fi
-
-  if [ "$base_exists" = true ] && [ "$ready_exists" = true ] && [ "$cache_exists" = true ] && [ "$catalog_exists" = true ]; then
-    print_success "Complete setup already exists!"
-    echo ""
-    print_status "What would you like to do?"
-    echo "  1) Use existing setup (fast, ~30 seconds)"
-    echo "  2) Rebuild base image only"
-    echo "  3) Rebuild ready image only"
-    echo "  4) Rebuild everything"
-    echo "  5) Exit"
-    echo ""
-    read -p "Choose [1-5]: " -n 1 -r
-    echo
-
-    case $REPLY in
-    1)
-      print_status "Using existing setup"
-      export SKIP_BASE_BUILD=true
-      export SKIP_READY_BUILD=true
-      export SKIP_WARMUP=true
-      ;;
-    2)
-      print_status "Will rebuild base image only"
-      export SKIP_BASE_BUILD=false
-      export SKIP_READY_BUILD=true
-      export SKIP_WARMUP=true
-      ;;
-    3)
-      print_status "Will rebuild ready image only"
-      export SKIP_BASE_BUILD=true
-      export SKIP_READY_BUILD=false
-      export SKIP_WARMUP=false
-      ;;
-    4)
-      print_status "Will rebuild everything"
-      export SKIP_BASE_BUILD=false
-      export SKIP_READY_BUILD=false
-      export SKIP_WARMUP=false
-      ;;
-    5)
-      print_status "Exiting"
-      exit 0
-      ;;
-    *)
-      print_warning "Invalid choice, using existing setup"
-      export SKIP_BASE_BUILD=true
-      export SKIP_READY_BUILD=true
-      export SKIP_WARMUP=true
-      ;;
-    esac
-  elif [ "$base_exists" = true ] && [ "$ready_exists" = true ]; then
-    print_status "Images exist, only tool discovery needed"
-    export SKIP_BASE_BUILD=true
-    export SKIP_READY_BUILD=true
-    export SKIP_WARMUP=false
-  elif [ "$base_exists" = true ]; then
-    print_status "Base image exists, will build ready image"
-    export SKIP_BASE_BUILD=true
-    export SKIP_READY_BUILD=false
-    export SKIP_WARMUP=false
-  else
-    print_status "No existing setup found, will build everything"
-    export SKIP_BASE_BUILD=false
-    export SKIP_READY_BUILD=false
-    export SKIP_WARMUP=false
-  fi
-
   return 0
 }
 
@@ -409,16 +321,15 @@ create_directories() {
 
 # Function to build Docker image
 build_docker_image() {
-  if [ "${SKIP_BASE_BUILD:-false}" = true ]; then
-    print_status "Skipping base image build (already exists)"
+  # Check if base image already exists
+  if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "kali-security-mcp-server:latest"; then
+    print_status "Base image already exists - skipping build"
     return 0
   fi
 
   print_status "Building Kali Linux Security MCP Server image..."
   print_warning "This may take 15-30 minutes on first build"
-
   cd "$(dirname "$0")"
-
   if docker build -t "kali-security-mcp-server" .; then
     print_success "Docker image built successfully"
   else
@@ -439,37 +350,30 @@ set_docker_secrets() {
   print_success "Docker secrets configured"
 }
 
-check_ready_image() {
-  print_status "Checking for existing ready image..."
-
-  if docker images | grep -q "$KALI_READY_IMAGE"; then
-    print_success "Ready image '$KALI_READY_IMAGE' already exists"
-    print_status "Warm-up will use existing image (fast)"
-    export SKIP_READY_BUILD="true"
-  else
-    print_warning "Ready image not found"
-    print_status "Warm-up will build it (takes 10-30 minutes)"
-    export SKIP_READY_BUILD="false"
-  fi
-}
-
 # Function to warm up tool discovery
 warmup_tool_discovery() {
-  if [ "${SKIP_WARMUP:-false}" = true ]; then
-    print_status "Skipping warm-up (tools already discovered)"
+  # Check if ready image and cache already exist - skip if both present
+  local ready_exists=false
+  local cache_exists=false
+
+  if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "kali-mcp-ready:latest"; then
+    ready_exists=true
+  fi
+
+  if [ -f "$HOME_DIR/.docker/mcp/kali-tools-cache.json" ]; then
+    cache_exists=true
+  fi
+
+  if [ "$ready_exists" = true ] && [ "$cache_exists" = true ]; then
+    print_success "Ready image and tool cache already exist - skipping warm-up"
     return 0
   fi
 
   print_status "Running tool discovery warm-up..."
 
-  # Check if ready image exists
-  if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "kali-mcp-ready:latest"; then
-    if [ "${SKIP_READY_BUILD:-false}" = true ]; then
-      print_success "Ready image already exists, skipping installation"
-      print_status "Only running tool discovery (fast, ~2-3 minutes)"
-    else
-      print_warning "Ready image exists but will be rebuilt"
-    fi
+  if [ "$ready_exists" = true ]; then
+    print_success "Ready image already exists, only running tool discovery"
+    print_status "This should be fast (~2-3 minutes)"
   else
     print_warning "Ready image not found - will install kali-linux-everything"
     print_warning "This process can take 10-30 minutes depending on your system"
@@ -488,7 +392,7 @@ warmup_tool_discovery() {
     -e KALI_CONTAINER_PREFIX="$CONTAINER_PREFIX" \
     -e KALI_BASE_IMAGE="$KALI_BASE_IMAGE" \
     -e KALI_READY_IMAGE="$KALI_READY_IMAGE" \
-    -e KALI_SKIP_BUILD="${SKIP_READY_BUILD:-false}" \
+    -e KALI_SKIP_BUILD="$ready_exists" \
     -e KALI_CACHE_FILE="/mcp/kali-tools-cache.json" \
     -v "$HOME_DIR/.docker/mcp:/mcp" \
     -v /var/run/docker.sock:/var/run/docker.sock \
@@ -516,7 +420,7 @@ print(f'WARMUP_COMPLETE:{len(result[\"tools\"])}')
   # Show progress
   echo ""
   print_status "Discovery in progress (PID: $warmup_pid)..."
-  if [ "${SKIP_READY_BUILD:-false}" = true ]; then
+  if [ "$ready_exists" = true ]; then
     print_status "Using existing ready image (fast path)"
   else
     print_status "Installing packages and discovering tools (slow path)"
@@ -560,9 +464,13 @@ print(f'WARMUP_COMPLETE:{len(result[\"tools\"])}')
   docker stop "$warmup_container" 2>/dev/null || true
   rm -f /tmp/kali-warmup.log
 }
-
 # Function to create custom catalog
 create_custom_catalog() {
+  if docker mcp catalog show "$KALI_CATALOG_NAME" &>/dev/null; then
+    print_success "Catalog already imported - skipping"
+    return 0
+  fi
+
   print_status "Creating Kali Security MCP catalog..."
 
   # Create the catalog YAML file
@@ -643,6 +551,12 @@ EOF
 
 # Function to enable kali security MCP server
 enable_server() {
+  # Check if server is already enabled
+  if docker mcp server ls 2>/dev/null | grep -q "$SERVER_NAME"; then
+    print_success "Server already enabled - skipping"
+    return 0
+  fi
+
   print_status "Enabling Kali Security MCP server..."
 
   # Enable the server (this adds it to registry.yaml automatically)
@@ -852,9 +766,9 @@ create_systemd_service() {
 
   print_status "Creating systemd service for auto-start..."
 
-  local service_file="/etc/systemd/system/kali-mcp-gateway.service"
+  local service_file="/etc/systemd/system/kali-security-gateway.service"
   local service_content="[Unit]
-Description=Kali Linux MCP Gateway
+Description=Kali Security MCP Gateway
 After=docker.service
 Requires=docker.service
 
@@ -867,7 +781,7 @@ ExecStart=/usr/bin/docker run --rm -i \\
     -v $HOME_DIR/.docker/mcp:/mcp \\
     docker/mcp-gateway \\
     --catalog=/mcp/catalogs/docker-mcp.yaml \\
-    --catalog=/mcp/catalogs/custom.yaml \\
+    --catalog=/mcp/catalogs/kali-security.yaml \\
     --config=/mcp/config.yaml \\
     --registry=/mcp/registry.yaml \\
     --tools-config=/mcp/tools.yaml \\
@@ -883,10 +797,10 @@ WantedBy=multi-user.target"
     print_success "Systemd service created"
 
     # Enable and start the service
-    if sudo systemctl daemon-reload && sudo systemctl enable kali-mcp-gateway.service; then
+    if sudo systemctl daemon-reload && sudo systemctl enable kali-security-gateway.service; then
       print_success "Service enabled for auto-start on boot"
-      print_warning "To start service now: sudo systemctl start kali-mcp-gateway.service"
-      print_warning "To check status: sudo systemctl status kali-mcp-gateway.service"
+      print_warning "To start service now: sudo systemctl start kali-security-gateway.service"
+      print_warning "To check status: sudo systemctl status kali-security-gateway.service"
     else
       print_error "Failed to enable systemd service"
     fi
@@ -904,13 +818,13 @@ create_launchd_service() {
 
   print_status "Creating launchd service for auto-start..."
 
-  local plist_file="$HOME_DIR/Library/LaunchAgents/com.docker.mcp.kali.plist"
+  local plist_file="$HOME_DIR/Library/LaunchAgents/com.docker.mcp.kali-security.plist"
   local plist_content="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
 <plist version=\"1.0\">
 <dict>
     <key>Label</key>
-    <string>com.docker.mcp.kali</string>
+    <string>com.docker.mcp.kali-security</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/docker</string>
@@ -923,7 +837,7 @@ create_launchd_service() {
         <string>$HOME_DIR/.docker/mcp:/mcp</string>
         <string>docker/mcp-gateway</string>
         <string>--catalog=/mcp/catalogs/docker-mcp.yaml</string>
-        <string>--catalog=/mcp/catalogs/custom.yaml</string>
+        <string>--catalog=/mcp/catalogs/kali-security.yaml</string>
         <string>--config=/mcp/config.yaml</string>
         <string>--registry=/mcp/registry.yaml</string>
         <string>--tools-config=/mcp/tools.yaml</string>
@@ -934,9 +848,9 @@ create_launchd_service() {
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>$HOME_DIR/.docker/mcp/kali-mcp.log</string>
+    <string>$HOME_DIR/.docker/mcp/kali-security.log</string>
     <key>StandardErrorPath</key>
-    <string>$HOME_DIR/.docker/mcp/kali-mcp.error.log</string>
+    <string>$HOME_DIR/.docker/mcp/kali-security.error.log</string>
 </dict>
 </plist>"
 
@@ -946,8 +860,8 @@ create_launchd_service() {
     # Load the launchd agent
     if launchctl load "$plist_file" 2>/dev/null; then
       print_success "Service loaded for auto-start on login"
-      print_warning "To start service now: launchctl start com.docker.mcp.kali"
-      print_warning "To unload: launchctl unload com.docker.mcp.kali"
+      print_warning "To start service now: launchctl start com.docker.mcp.kali-security"
+      print_warning "To unload: launchctl unload com.docker.mcp.kali-security"
     else
       print_warning "Service created but not loaded (may require manual loading)"
     fi
@@ -1050,16 +964,16 @@ show_next_steps() {
   echo -e "${GREEN}=== AUTO-START MANAGEMENT ===${NC}"
   case "$(uname -s)" in
   Darwin*)
-    echo "  • Status: launchctl list | grep com.docker.mcp.kali"
-    echo "  • Start: launchctl start com.docker.mcp.kali"
-    echo "  • Stop: launchctl stop com.docker.mcp.kali"
-    echo "  • Remove: launchctl unload ~/Library/LaunchAgents/com.docker.mcp.kali.plist"
+    echo "  • Status: launchctl list | grep com.docker.mcp.kali-security"
+    echo "  • Start: launchctl start com.docker.mcp.kali-security"
+    echo "  • Stop: launchctl stop com.docker.mcp.kali-security"
+    echo "  • Remove: launchctl unload ~/Library/LaunchAgents/com.docker.mcp.kali-security.plist"
     ;;
   Linux*)
-    echo "  • Status: sudo systemctl status kali-mcp-gateway.service"
-    echo "  • Start: sudo systemctl start kali-mcp-gateway.service"
-    echo "  • Stop: sudo systemctl stop kali-mcp-gateway.service"
-    echo "  • Remove: sudo systemctl disable kali-mcp-gateway.service"
+    echo "  • Status: sudo systemctl status kali-security-gateway.service"
+    echo "  • Start: sudo systemctl start kali-security-gateway.service"
+    echo "  • Stop: sudo systemctl stop kali-security-gateway.service"
+    echo "  • Remove: sudo systemctl disable kali-security-gateway.service"
     ;;
   esac
   echo "3. ${BLUE}Available Management Tools${NC}"
@@ -1083,7 +997,7 @@ show_next_steps() {
   echo "1. Check Docker is running: docker ps"
   echo "2. Verify MCP Toolkit is enabled in Docker Desktop"
   echo "3. Restart your AI assistant completely"
-  echo "4. Check container logs: docker logs \$(docker ps -q --filter name=kali-mcp)"
+  echo "4. Check container logs: docker logs \$(docker ps -q --filter name=kali-security)"
   echo "5. Verify server registration: docker mcp server list"
   echo "6. Check catalog file: cat $CUSTOM_CATALOG"
   echo "7. Check auto-start service status (see commands above)"
@@ -1102,7 +1016,7 @@ main() {
   parse_arguments "$@"
 
   # Handle clean flag
-  if [ "$CLEAN_SETUP" = true ]; then
+  if [ "$CLEAN_SETUP" = "true" ]; then
     cleanup_all
   fi
 
@@ -1114,7 +1028,6 @@ main() {
 
   # Check what already exists
   check_existing_setup
-
   # Conditional builds based on checks
   build_docker_image
   set_docker_secrets
