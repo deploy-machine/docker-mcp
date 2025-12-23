@@ -1,0 +1,300 @@
+# Dynamic Kali Linux Everything MCP Server Installation Guide
+
+## 🚀 Build and Deploy Instructions
+
+### 1. Build the Docker Image
+```bash
+# Navigate to the Kali Linux example directory
+cd examples/kali-linux
+
+# Note: This will download the large Kali Everything image ( ~10GB)
+docker build -t kali-linux-dynamic-mcp-server .
+```
+
+### 2. Set Up Configuration (Optional)
+```bash
+# Set custom environment variables for timeouts and container settings
+docker mcp secret set KALI_TARGET_TIMEOUT="180"
+docker mcp secret set KALI_CONTAINER_PREFIX="kali-dynamic"
+docker mcp secret set KALI_IMAGE="kalilinux/kali-rolling-everything"
+
+# Verify secrets are set
+docker mcp secret list
+```
+
+### 3. Create Custom Catalog
+```bash
+# Create catalogs directory if it doesn't exist
+mkdir -p ~/.docker/mcp/catalogs
+
+# Create or edit custom.yaml catalog file
+nano ~/.docker/mcp/catalogs/custom.yaml
+```
+
+Add this entry to custom.yaml:
+```yaml
+version: 2
+name: custom
+displayName: Custom MCP Servers
+registry:
+  kali-linux-dynamic:
+    description: "Dynamic Kali Linux Everything server with all security tools in fresh containers"
+    title: "Kali Linux Dynamic Security Tools"
+    type: server
+    dateAdded: "2025-01-22T00:00:00Z"
+    image: kali-linux-dynamic-mcp-server:latest
+    ref: ""
+    readme: ""
+    toolsUrl: ""
+    source: ""
+    upstream: ""
+    icon: ""
+    tools:
+      - name: list_security_tools
+      - name: get_tool_info
+      - name: search_tools
+      - name: container_status
+    secrets:
+      - name: KALI_TARGET_TIMEOUT
+        env: KALI_TARGET_TIMEOUT
+        example: "120"
+      - name: KALI_CONTAINER_PREFIX
+        env: KALI_CONTAINER_PREFIX
+        example: "kali-mcp"
+      - name: KALI_IMAGE
+        env: KALI_IMAGE
+        example: "kalilinux/kali-rolling-everything"
+    metadata:
+      category: monitoring
+      tags:
+        - security
+        - penetration-testing
+        - kali-linux
+        - dynamic-tools
+        - vulnerability-assessment
+        - forensics
+      license: MIT
+      owner: local
+```
+
+### 4. Update Registry
+```bash
+# Edit the registry file
+nano ~/.docker/mcp/registry.yaml
+```
+
+Add this entry under the existing `registry:` key:
+```yaml
+registry:
+  # ... existing servers ...
+  kali-linux-dynamic:
+    ref: ""
+```
+
+**IMPORTANT**: The entry must be under `registry:` key, not at root level.
+
+### 5. Configure Claude Desktop
+
+Find your Claude Desktop config file:
+
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+Edit file and add your custom catalog to the mcpServers array:
+```json
+{
+  "mcpServers": {
+    "mcp-toolkit-gateway": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v", "/var/run/docker.sock:/var/run/docker.sock",
+        "-v", "[YOUR_HOME]/.docker/mcp:/mcp",
+        "docker/mcp-gateway",
+        "--catalog=/mcp/catalogs/docker-mcp.yaml",
+        "--catalog=/mcp/catalogs/custom.yaml",
+        "--config=/mcp/config.yaml",
+        "--registry=/mcp/registry.yaml",
+        "--tools-config=/mcp/tools.yaml",
+        "--transport=stdio"
+      ]
+    }
+  }
+}
+```
+
+**NOTE**: JSON does not support comments. The custom.yaml catalog line should be added without any comment.
+
+Replace `[YOUR_HOME]` with:
+- **macOS**: `/Users/your_username`
+- **Windows**: `C:\\Users\\your_username` (use double backslashes)
+- **Linux**: `/home/your_username`
+
+### 6. Restart Claude Desktop
+
+1. Quit Claude Desktop completely
+2. Start Claude Desktop again
+3. Wait for initial tool discovery (may take 2-3 minutes)
+4. Your new tools should appear!
+
+### 7. Test Your Server
+```bash
+# Verify it appears in the server list
+docker mcp server list
+
+# Check container status during first run
+docker ps | grep kali-dynamic
+
+# If you don't see your server, check container logs:
+docker logs [container_name]
+```
+
+## 🔧 First-Time Setup (Important)
+
+### Initial Setup Tasks
+1. **Image Download:** First execution pulls Kali Linux Everything (~10GB) - may take 15-30 minutes depending on network
+2. **Tool Discovery:** Server discovers 1000+ security tools - takes 2-3 minutes
+3. **Tool Registration:** Dynamic MCP tool creation - 1-2 minutes
+4. **Cache Creation:** Tools cached for subsequent faster startups
+
+### Test Basic Functionality
+```bash
+# List all available tools
+list_security_tools()
+
+# Get detailed information for a specific tool
+get_tool_info("nmap")
+
+# Search for tools containing specific keywords
+search_tools("sql")
+
+# Execute a basic tool to test container creation
+nmap("--help")
+```
+
+### Common Usage Examples
+
+#### Network Scanning
+```bash
+# Port scan a target
+nmap("-sS -p 1-1000 example.com")
+
+# Aggressive scan with service detection
+nmap("-A -p 1-1000 target.com")
+```
+
+#### Web Application Testing
+```bash
+# Web vulnerability scan
+nikto("-h http://target.com")
+
+# WordPress security scan
+wpscan("--url http://blog.com --enumerate p")
+
+# Directory bruteforcing
+dirb("http://target.com /usr/share/wordlists/dirb/common.txt")
+```
+
+#### Password Attacks
+```bash
+# SSH brute force attack
+hydra("-l admin -P /usr/share/wordlists/rockyou.txt ssh://192.168.1.1")
+
+# Password hash cracking
+john("--wordlist=/usr/share/wordlists/rockyou.txt hash.txt")
+```
+
+#### Exploit Research
+```bash
+# Search for exploits
+searchsploit("apache 2.4")
+
+# Exact match search
+searchsploit("--exact \"Apache 2.4.49\"")
+```
+
+## ⚠️ Legal Notice
+
+**CRITICAL LEGAL WARNING:** This server provides access to professional penetration testing tools.
+
+- **ONLY** use on systems you own or have explicit written permission to test
+- **NEVER** use on systems without authorization
+- **RESPONSIBLE** usage is required at all times
+- **EDUCATIONAL** purposes only
+- **LEGAL** compliance is your responsibility
+
+Unauthorized security testing may result in:
+- Criminal charges and prosecution
+- Civil liability and lawsuits
+- Network termination and account suspension
+- Loss of professional reputation
+
+## 📊 Resource Requirements
+
+- **Minimum:** 8GB RAM, 50GB free disk space
+- **Recommended:** 16GB RAM, 100GB free disk space
+- **Network:** Broadband for initial image download
+- **Storage:** SSD recommended for better performance
+
+## 🐛 Troubleshooting
+
+### First Run Issues
+- **Image Download Fails:** Check Docker Hub access and network connectivity
+- **Tool Discovery Timeout:** Increase timeout for large systems
+- **Memory Errors:** Close other applications, ensure sufficient RAM
+- **Disk Space:** Free up space, consider external storage
+
+### Common Errors
+- **Container Creation Failed:** Check Docker daemon status
+- **Tool Not Found:** Verify tool discovery completed successfully
+- **Permission Denied:** Check Docker user permissions
+- **Network Errors:** Verify Docker networking configuration
+
+### Performance Optimization
+- Use faster storage (SSD) for Docker
+- Allocate more memory to Docker Desktop
+- Consider using smaller Kali images for specific tasks
+- Clean up unused Docker images and containers
+
+### Debug Commands
+```bash
+# Check Docker status
+docker --version
+docker info
+docker images
+docker ps -a
+
+# Manual tool test
+docker run --rm kalilinux/kali-rolling-everything nmap --version
+
+# Test container creation
+docker run -d --name test-kali kalilinux/kali-rolling-everything tail -f /dev/null
+docker exec test-kali nmap --help
+docker stop test-kali
+```
+
+## 🔄 Advanced Configuration
+
+### Custom Tool Categories
+Edit the `security_tools` dictionary in `kali_server.py` to add new categories or modify existing groupings.
+
+### Timeout Configuration
+Set different timeouts based on tool types:
+- **Network Scanning:** 60-120 seconds
+- **Password Attacks:** 300-600 seconds
+- **Forensics:** 300-900 seconds
+- **Exploitation:** 180-300 seconds
+
+### Resource Limits
+Configure Docker resource limits for containers to prevent system overload:
+- Memory limits
+- CPU shares
+- Disk I/O limits
+- Network bandwidth limits
+
+---
+
+⚠️ **Final Warning:** This is a professional security toolkit. Use responsibly, legally, and ethically. The creators are not responsible for misuse or unauthorized testing activities.
