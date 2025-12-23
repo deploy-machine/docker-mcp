@@ -105,36 +105,74 @@ cleanup_all() {
 
 check_existing_setup() {
   print_status "Checking existing setup state..."
+
+  local base_exists=false
+  local ready_exists=false
+  local tools_discovered=false
+  local catalog_exists=false
+  local server_enabled=false
+
   # Check base MCP server image
   if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "kali-security-mcp-server:latest"; then
     print_success "✓ Base image exists: kali-security-mcp-server:latest"
+    base_exists=true
   else
     print_warning "✗ Base image not found"
   fi
+
   # Check ready image (with tools installed)
   if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "kali-mcp-ready:latest"; then
     print_success "✓ Ready image exists: kali-mcp-ready:latest"
+    ready_exists=true
   else
     print_warning "✗ Ready image not found - will build during warm-up"
   fi
+
   # Check if tool discovery cache exists
   if [ -f "$HOME_DIR/.docker/mcp/kali-tools-cache.json" ]; then
     print_success "✓ Tool discovery cache found"
+    tools_discovered=true
   else
     print_warning "✗ Tool discovery cache not found - will discover"
   fi
+
   # Check if catalog exists
   if docker mcp catalog show "$KALI_CATALOG_NAME" &>/dev/null; then
     print_success "✓ Catalog imported in Docker MCP"
+    catalog_exists=true
   else
     print_warning "✗ Catalog not imported - will create"
   fi
+
   # Check if server is enabled
   if docker mcp server ls 2>/dev/null | grep -q "kali-security"; then
     print_success "✓ Server is enabled"
+    server_enabled=true
   else
     print_warning "✗ Server not enabled - will enable"
   fi
+
+  # Decision matrix for skipping builds
+  if [ "$base_exists" = true ] && [ "$ready_exists" = true ] && [ "$tools_discovered" = true ] && [ "$catalog_exists" = true ] && [ "$server_enabled" = true ]; then
+    print_success "Complete setup already exists!"
+    echo ""
+    read -p "Skip rebuild and use existing setup? [Y/n] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+      SKIP_BUILD=true
+      SKIP_WARMUP=true
+      return 0
+    fi
+  elif [ "$base_exists" = true ] && [ "$ready_exists" = true ]; then
+    print_success "Images exist, only tool discovery needed"
+    SKIP_BUILD=true
+    SKIP_WARMUP=false
+  elif [ "$base_exists" = true ]; then
+    print_success "Base image exists, will build ready image"
+    SKIP_BUILD=true # Skip base build, but do ready build
+    SKIP_WARMUP=false
+  fi
+
   echo ""
   return 0
 }
@@ -254,60 +292,7 @@ check_prerequisites() {
   print_success "Docker prerequisites satisfied"
 }
 
-check_existing_setup() {
-  print_status "Checking existing setup state..."
 
-  local base_exists=false
-  local ready_exists=false
-  local tools_discovered=false
-
-  # Check base MCP server image
-  if docker images | grep -q "kali-security-mcp-server"; then
-    print_success "Base image exists: kali-security-mcp-server:latest"
-    base_exists=true
-  else
-    print_warning "Base image not found - will build"
-  fi
-
-  # Check ready image (with tools installed)
-  if docker images | grep -q "$KALI_READY_IMAGE"; then
-    print_success "Ready image exists: $KALI_READY_IMAGE:latest"
-    ready_exists=true
-  else
-    print_warning "Ready image not found - will build during warm-up"
-  fi
-
-  # Check if tool discovery cache exists
-  if [ -f "$HOME_DIR/.docker/mcp/kali-tools-cache.json" ]; then
-    print_success "Tool discovery cache found"
-    tools_discovered=true
-  else
-    print_warning "Tool discovery cache not found - will discover"
-  fi
-
-  # Decision matrix
-  if [ "$base_exists" = true ] && [ "$ready_exists" = true ] && [ "$tools_discovered" = true ]; then
-    print_success "Complete setup already exists!"
-    echo ""
-    read -p "Skip rebuild and use existing setup? [Y/n] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
-      SKIP_BUILD=true
-      SKIP_WARMUP=true
-      return 0
-    fi
-  elif [ "$base_exists" = true ] && [ "$ready_exists" = true ]; then
-    print_success "Images exist, only tool discovery needed"
-    SKIP_BUILD=true
-    SKIP_WARMUP=false
-  elif [ "$base_exists" = true ]; then
-    print_success "Base image exists, will build ready image"
-    SKIP_BUILD=true # Skip base build, but do ready build
-    SKIP_WARMUP=false
-  fi
-
-  return 0
-}
 
 # Function to create necessary directories
 create_directories() {
@@ -496,12 +481,16 @@ print(f'WARMUP_COMPLETE:{len(result[\"tools\"])}')
 }
 # Function to create custom catalog
 create_custom_catalog() {
+  print_status "Checking catalog status..."
   if docker mcp catalog show "$KALI_CATALOG_NAME" &>/dev/null; then
     print_success "Catalog already imported - skipping"
     return 0
   fi
 
-  print_status "Creating Kali Security MCP catalog..."
+  print_status "Creating Kali Security MCP catalog at $KALI_CATALOG_FILE..."
+
+  # Ensure catalogs directory exists
+  mkdir -p "$(dirname "$KALI_CATALOG_FILE")"
 
   # Create the catalog YAML file
   cat >"$KALI_CATALOG_FILE" <<'EOF'
@@ -566,7 +555,12 @@ registry:
       license: MIT
       owner: local
 EOF
-  print_success "Catalog file created at $KALI_CATALOG_FILE"
+  if [ $? -eq 0 ]; then
+    print_success "Catalog file created at $KALI_CATALOG_FILE"
+  else
+    print_error "Failed to create catalog file"
+    exit 1
+  fi
 
   # Import catalog into Docker MCP system
   print_status "Importing catalog into Docker MCP..."
