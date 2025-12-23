@@ -344,10 +344,40 @@ set_docker_secrets() {
 
   docker mcp secret set KALI_TARGET_TIMEOUT="$TARGET_TIMEOUT" 2>/dev/null || true
   docker mcp secret set KALI_CONTAINER_PREFIX="$CONTAINER_PREFIX" 2>/dev/null || true
-  docker mcp secret set KALI_BASE_IMAGE="$KALI_BASE_IMAGE" 2>/dev/null || true
+  docker mcp secret set KALI_BASE_IMAGE="kali-security-mcp-server:latest" 2>/dev/null || true
   docker mcp secret set KALI_READY_IMAGE="$KALI_READY_IMAGE" 2>/dev/null || true
 
   print_success "Docker secrets configured"
+}
+
+# Function to configure MCP config.yaml for kali-security
+configure_mcp_config() {
+  print_status "Configuring MCP config.yaml for kali-security..."
+  
+  local config_file="$MCP_DIR/config.yaml"
+  
+  # Create config.yaml if it doesn't exist
+  if [ ! -f "$config_file" ]; then
+    touch "$config_file"
+  fi
+  
+  # Check if kali-security config already exists
+  if grep -q "^kali-security:" "$config_file" 2>/dev/null; then
+    print_status "kali-security config already exists, updating..."
+    # Remove old config section
+    sed -i.backup '/^kali-security:/,/^[^ ]/d' "$config_file"
+  fi
+  
+  # Append kali-security configuration
+  cat >>"$config_file" <<EOF
+kali-security:
+  KALI_BASE_IMAGE: "kali-security-mcp-server:latest"
+  KALI_CONTAINER_PREFIX: "$CONTAINER_PREFIX"
+  KALI_TARGET_TIMEOUT: "$TARGET_TIMEOUT"
+  KALI_READY_IMAGE: "$KALI_READY_IMAGE"
+EOF
+  
+  print_success "MCP config.yaml updated with kali-security settings"
 }
 
 # Function to warm up tool discovery
@@ -390,7 +420,7 @@ warmup_tool_discovery() {
     --rm \
     -e KALI_TARGET_TIMEOUT="$TARGET_TIMEOUT" \
     -e KALI_CONTAINER_PREFIX="$CONTAINER_PREFIX" \
-    -e KALI_BASE_IMAGE="$KALI_BASE_IMAGE" \
+    -e KALI_BASE_IMAGE="kali-security-mcp-server:latest" \
     -e KALI_READY_IMAGE="$KALI_READY_IMAGE" \
     -e KALI_SKIP_BUILD="$ready_exists" \
     -e KALI_CACHE_FILE="/mcp/kali-tools-cache.json" \
@@ -515,7 +545,7 @@ registry:
         example: "kali-security"
       - name: KALI_BASE_IMAGE
         env: KALI_BASE_IMAGE
-        example: "kalilinux/kali-rolling"
+        example: "kali-security-mcp-server:latest"
       - name: KALI_READY_IMAGE
         env: KALI_READY_IMAGE
         example: "kali-mcp-ready"
@@ -1031,6 +1061,7 @@ main() {
   # Conditional builds based on checks
   build_docker_image
   set_docker_secrets
+  configure_mcp_config
   create_custom_catalog
   enable_server
   warmup_tool_discovery
