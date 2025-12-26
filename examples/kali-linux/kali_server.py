@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Kali Linux Security MCP Server - UNIFIED COMMAND RUNNER VERSION
-Based on unified command runner approach but specialized for Kali security tools.
+Kali Linux Security MCP Server - DIRECT EXECUTION VERSION
+Fixed version that runs commands directly instead of using Docker containers.
+Since we're already running inside a Kali container, we can execute tools directly.
 """
 import os
 import sys
@@ -27,8 +28,6 @@ mcp = FastMCP("kali-security")
 
 # Configuration
 SECURITY_TIMEOUT = int(os.environ.get("KALI_TARGET_TIMEOUT", "120"))
-CONTAINER_PREFIX = os.environ.get("KALI_CONTAINER_PREFIX", "kali-security")
-KALI_BASE_IMAGE = os.environ.get("KALI_BASE_IMAGE", "kali-security-mcp-server:latest")
 MAX_WORKERS = int(os.environ.get("KALI_DISCOVERY_WORKERS", "10"))
 
 # Global tool cache
@@ -41,153 +40,6 @@ TOOL_CACHE_FILE = os.environ.get("KALI_CACHE_FILE", "/mcp/kali-tools-cache.json"
 
 # Thread-safe lock
 discovery_lock = Lock()
-
-# Kali security command definitions
-COMMAND_DEFINITIONS = {
-    # Information Gathering
-    "nmap": {
-        "description": "Network discovery and security auditing tool",
-        "category": "Information Gathering",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Nmap arguments (e.g., '-sS -p 1-1000 target.com')"}
-        }
-    },
-    "whois": {
-        "description": "Domain information lookup",
-        "category": "Information Gathering", 
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Whois arguments"}
-        }
-    },
-    "ping": {
-        "description": "Network ping tool",
-        "category": "Information Gathering",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Ping arguments"}
-        }
-    },
-    
-    # Web Application Analysis
-    "nikto": {
-        "description": "Web server scanner",
-        "category": "Web Application Analysis",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Nikto arguments"}
-        }
-    },
-    "sqlmap": {
-        "description": "SQL injection and database takeover tool",
-        "category": "Web Application Analysis",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "SQLMap arguments"}
-        }
-    },
-    "dirb": {
-        "description": "Web content scanner",
-        "category": "Web Application Analysis",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Dirb arguments"}
-        }
-    },
-    "gobuster": {
-        "description": "Directory/file, DNS and VHost busting tool",
-        "category": "Web Application Analysis", 
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Gobuster arguments"}
-        }
-    },
-    
-    # Password Attacks
-    "john": {
-        "description": "John the Ripper password cracker",
-        "category": "Password Attacks",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "John the Ripper arguments"}
-        }
-    },
-    "hashcat": {
-        "description": "Advanced password recovery tool",
-        "category": "Password Attacks",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Hashcat arguments"}
-        }
-    },
-    "hydra": {
-        "description": "Online password cracking tool",
-        "category": "Password Attacks",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Hydra arguments"}
-        }
-    },
-    
-    # Vulnerability Analysis
-    "lynis": {
-        "description": "Security auditing tool for Unix/Linux systems",
-        "category": "Vulnerability Analysis",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Lynis arguments"}
-        }
-    },
-    
-    # Exploitation Tools
-    "msfconsole": {
-        "description": "Metasploit Framework console",
-        "category": "Exploitation Tools",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Metasploit console arguments"}
-        }
-    },
-    
-    # Wireless Attacks
-    "aircrack-ng": {
-        "description": "WiFi security auditing tools suite",
-        "category": "Wireless Attacks",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Aircrack-ng arguments"}
-        }
-    },
-    
-    # Sniffing & Spoofing
-    "wireshark": {
-        "description": "Network protocol analyzer",
-        "category": "Sniffing & Spoofing",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Wireshark arguments"}
-        }
-    },
-    "tcpdump": {
-        "description": "Network capture and analysis tool",
-        "category": "Sniffing & Spoofing",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Tcpdump arguments"}
-        }
-    },
-    
-    # Forensics
-    "volatility": {
-        "description": "Memory forensics framework",
-        "category": "Forensics",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Volatility arguments"}
-        }
-    },
-    "autopsy": {
-        "description": "Digital forensics platform",
-        "category": "Forensics",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "Autopsy arguments"}
-        }
-    },
-    
-    # Social Engineering
-    "setoolkit": {
-        "description": "Social Engineer Toolkit",
-        "category": "Social Engineering",
-        "parameters": {
-            "args": {"type": "string", "default": "--help", "description": "SET arguments"}
-        }
-    }
-}
 
 def discover_kali_tools_optimized(force_refresh: bool = False) -> dict:
     """Optimized tool discovery with caching"""
@@ -279,11 +131,13 @@ def initialize_tools():
     DISCOVERY_INFO = discovery_result.get("discovery_info", {})
 
 def sanitize_input(input_str: str) -> str:
-    """Sanitize input to prevent command injection"""
+    """Sanitize input to prevent command injection but allow whitespace in args"""
     if not input_str or not input_str.strip():
         return ""
-    cleaned = re.sub(r'[;&|`$()<>]', '', input_str.strip())
-    return re.sub(r'[^a-zA-Z0-9._\-/@:]', '', cleaned)
+    # Remove only dangerous characters, but preserve spaces and standard command characters
+    cleaned = re.sub(r'[;&|`$()]', '', input_str.strip())
+    # Allow alphanumerics, spaces, hyphens, underscores, forward slashes, dots, @, colons, quotes
+    return re.sub(r'[^a-zA-Z0-9._\-/@:\s"\'\[\]]', '', cleaned)
 
 def is_safe_command(command: str) -> bool:
     """Check if command is safe to execute"""
@@ -296,45 +150,19 @@ def is_safe_command(command: str) -> bool:
             return False
     return True
 
-def setup_security_container(container_name: str) -> str:
-    """Setup security container"""
+def run_security_command_direct(command_name: str, args: str, timeout: int = 120) -> str:
+    """Run security command directly in the current container (FIXED VERSION - NO DOCKER)"""
     try:
-        logger.info(f"Starting security container: {container_name}")
-        start_cmd = f"docker run -d --name {container_name} --rm --cap-add=NET_RAW --cap-add=NET_ADMIN {KALI_BASE_IMAGE} tail -f /dev/null"
-        result = subprocess.run(start_cmd, shell=True, capture_output=True, text=True, timeout=30)
-        
-        if result.returncode != 0:
-            return f"❌ Error starting container: {result.stderr}"
-        
-        time.sleep(2)
-        logger.info(f"Container {container_name} ready")
-        return ""
-        
-    except Exception as e:
-        return f"❌ Error setting up container: {str(e)}"
-
-def run_security_command_in_container(command_name: str, args: str, timeout: int = 120) -> str:
-    """Run security command in container"""
-    container_name = f"{CONTAINER_PREFIX}-{command_name}-{os.getpid()}-{int(time.time())}"
-    
-    try:
-        setup_error = setup_security_container(container_name)
-        if setup_error:
-            return setup_error
-        
         sanitized_args = sanitize_input(args)
         full_command = f"{command_name} {sanitized_args}".strip()
         
         if not is_safe_command(full_command):
             return "❌ Error: Command contains potentially dangerous operations"
         
-        exec_cmd = f"docker exec {container_name} {full_command}"
-        logger.info(f"Executing: {exec_cmd}")
+        logger.info(f"Executing directly: {full_command}")
         
-        result = subprocess.run(exec_cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        
-        cleanup_cmd = f"docker stop {container_name}"
-        subprocess.run(cleanup_cmd, shell=True, capture_output=True, timeout=10)
+        # FIXED: Run command directly instead of using Docker exec
+        result = subprocess.run(full_command, shell=True, capture_output=True, text=True, timeout=timeout)
         
         output = f"🔧 **Command:** `{full_command}`\n\n"
         
@@ -352,9 +180,9 @@ def run_security_command_in_container(command_name: str, args: str, timeout: int
         return output
         
     except subprocess.TimeoutExpired:
-        cleanup_cmd = f"docker stop {container_name}"
-        subprocess.run(cleanup_cmd, shell=True, capture_output=True, timeout=10)
         return f"⏱️ Command timed out after {timeout} seconds"
+    except FileNotFoundError:
+        return f"❌ Error: Command '{command_name}' not found. Use list_commands() to see available tools."
     except Exception as e:
         logger.error(f"Error running security command: {e}")
         return f"❌ Error: {str(e)}"
@@ -401,22 +229,19 @@ async def run_command(command_name: str, args: str = "--help") -> str:
             timeout = 180
         
         logger.info(f"✅ Executing discovered tool: {command_name} ({category})")
-        return run_security_command_in_container(command_name, args, timeout)
+        return run_security_command_direct(command_name, args, timeout)
     
-    # PRIORITY 2: Fallback to predefined commands for popular tools
-    if command_name in COMMAND_DEFINITIONS:
-        command_def = COMMAND_DEFINITIONS[command_name]
-        category = command_def["category"]
-        
-        # Adjust timeout based on category
-        timeout = SECURITY_TIMEOUT
-        if category in ["Exploitation Tools", "Password Attacks"]:
-            timeout = 300
-        elif category in ["Wireless Attacks", "Forensics"]:
-            timeout = 180
-        
-        logger.info(f"✅ Executing predefined tool: {command_name} ({category})")
-        return run_security_command_in_container(command_name, args, timeout)
+    # PRIORITY 2: Allow any command in PATH (not just discovered ones)
+    # This makes it more flexible for tools that might not be categorized
+    try:
+        # Check if command exists in PATH
+        check_cmd = f"which {command_name}"
+        result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            logger.info(f"✅ Executing undetected tool: {command_name}")
+            return run_security_command_direct(command_name, args, SECURITY_TIMEOUT)
+    except:
+        pass
     
     # Tool not found - provide helpful error
     return f"""❌ Error: Unknown command '{command_name}'. 
@@ -442,19 +267,11 @@ async def list_commands(category: str = "") -> str:
     # Group commands by category from discovered tools
     all_commands = {}
     
-    # Add discovered commands (priority!)
+    # Add discovered commands
     for cmd_name, cat in AVAILABLE_TOOLS.items():
         if cat not in all_commands:
             all_commands[cat] = []
         all_commands[cat].append((cmd_name, {"description": f"Kali security tool", "category": cat}))
-    
-    # Add predefined commands for popular tools (fallback)
-    for cmd_name, cmd_def in COMMAND_DEFINITIONS.items():
-        if cmd_name not in AVAILABLE_TOOLS:
-            cat = cmd_def["category"]
-            if cat not in all_commands:
-                all_commands[cat] = []
-            all_commands[cat].append((cmd_name, cmd_def))
     
     if category.strip():
         if category in all_commands:
@@ -468,7 +285,7 @@ async def list_commands(category: str = "") -> str:
         for cat, commands in all_commands.items():
             if commands:
                 output += f"**{cat}** ({len(commands)} commands):\n"
-                for cmd_name, cmd_def in commands[:15]:  # Show more tools now
+                for cmd_name, cmd_def in commands[:15]:  # Show first 15 tools
                     output += f"  - `{cmd_name}`: {cmd_def['description']}\n"
                 if len(commands) > 15:
                     output += f"  - ... and {len(commands) - 15} more commands\n"
@@ -487,188 +304,116 @@ async def get_command_info(command_name: str = "") -> str:
     
     command_name = command_name.strip()
     
-    # Check known commands first
-    if command_name in COMMAND_DEFINITIONS:
-        cmd_def = COMMAND_DEFINITIONS[command_name]
+    # Check if it's a discovered tool
+    if command_name in AVAILABLE_TOOLS:
+        category = AVAILABLE_TOOLS[command_name]
         
         output = f"📋 **Command Information: {command_name}**\n\n"
-        output += f"**Description:** {cmd_def['description']}\n"
-        output += f"**Category:** {cmd_def['category']}\n"
+        output += f"**Description:** Kali security tool\n"
+        output += f"**Category:** {category}\n"
+        output += f"**Status:** Available (discovered)\n"
         
-        if cmd_def.get("parameters"):
-            output += f"\n**Parameters:**\n"
-            for param_name, param_info in cmd_def["parameters"].items():
-                output += f"  - `{param_name}` ({param_info.get('type', 'string')}): {param_info.get('description', 'No description')}"
-                if 'default' in param_info:
-                    output += f" [default: {param_info['default']}]"
-                output += "\n"
+        # Try to get help information
+        try:
+            help_result = subprocess.run(f"{command_name} --help", shell=True, capture_output=True, text=True, timeout=10)
+            if help_result.returncode == 0 and help_result.stdout.strip():
+                help_lines = help_result.stdout.strip().split('\n')[:5]
+                output += f"\n**Help Preview:**\n```\n" + "\n".join(help_lines) + "\n```\n"
+        except:
+            pass
         
         output += f"\n**Example Usage:**\n```\nrun_command(command_name='{command_name}', args='--help')\n```"
         
         return output
     
-    # Check discovered tools
-    if command_name in AVAILABLE_TOOLS:
-        category = AVAILABLE_TOOLS[command_name]
-        
-        info = f"""📋 **Tool Information: {command_name}**
-
-**Description:** Kali Linux security tool
-**Category:** {category}
-
-**Getting Help:**
-```
-run_command(command_name='{command_name}', args='--help')
-```
-
-⚠️ **Legal:** Educational use only."""
-        
-        return info
+    # Try to get basic info for any command in PATH
+    try:
+        check_cmd = f"which {command_name}"
+        result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            output = f"📋 **Command Information: {command_name}**\n\n"
+            output += f"**Description:** Available command\n"
+            output += f"**Location:** {result.stdout.strip()}\n"
+            output += f"**Status:** Available (in PATH)\n"
+            output += f"\n**Example Usage:**\n```\nrun_command(command_name='{command_name}', args='--help')\n```"
+            return output
+    except:
+        pass
     
-    return f"❌ Error: Command '{command_name}' not found. Use list_commands() to see available commands."
-
-@mcp.tool()
-async def list_security_tools(category: str = "") -> str:
-    """List all discovered security tools, optionally filtered by category."""
-    if not AVAILABLE_TOOLS:
-        initialize_tools()
-    
-    if not AVAILABLE_TOOLS:
-        return "❌ No tools discovered. Check Docker and Kali image availability."
-    
-    output = f"🔧 **Discovered Kali Tools ({len(AVAILABLE_TOOLS)} total):**\n\n"
-    
-    if category.strip():
-        if category in TOOL_CATEGORIES and TOOL_CATEGORIES[category]:
-            tools_list = TOOL_CATEGORIES[category]
-            output += f"**{category} ({len(tools_list)} tools):**\n"
-            for tool in sorted(tools_list)[:20]:
-                output += f"  - `{tool}`\n"
-            if len(tools_list) > 20:
-                output += f"  - ... and {len(tools_list) - 20} more tools\n"
-        else:
-            available_categories = [cat for cat, tools in TOOL_CATEGORIES.items() if tools]
-            output += f"❌ Category '{category}' not found. Available categories:\n"
-            for cat in sorted(available_categories):
-                output += f"  - {cat}\n"
-    else:
-        for cat_name, tools_list in TOOL_CATEGORIES.items():
-            if tools_list:
-                output += f"**{cat_name} ({len(tools_list)} tools):**\n"
-                for tool in sorted(tools_list)[:10]:
-                    output += f"  - `{tool}`\n"
-                if len(tools_list) > 10:
-                    output += f"  - ... and {len(tools_list) - 10} more tools\n"
-                output += "\n"
-    
-    return output
-
-@mcp.tool()
-async def get_tool_info(tool_name: str = "") -> str:
-    """Get detailed information about a specific security tool."""
-    if not tool_name.strip():
-        return "❌ Error: Tool name is required"
-    
-    sanitized_tool = sanitize_input(tool_name)
-    if not sanitized_tool:
-        return "❌ Error: Invalid tool name"
-    
-    if sanitized_tool not in AVAILABLE_TOOLS:
-        return f"❌ Error: Tool '{sanitized_tool}' not found. Use `list_security_tools` to see available tools."
-    
-    category = AVAILABLE_TOOLS.get(sanitized_tool, "Unknown")
-    
-    info = f"""📋 **Tool Information: {sanitized_tool}**
-
-**Category:** {category}
-
-**Getting Help:**
-```
-run_command(command_name='{sanitized_tool}', args='--help')
-```
-
-⚠️ **Legal:** Educational use only."""
-    
-    return info
+    return f"❌ Error: Command '{command_name}' not found. Use list_commands() to see available tools."
 
 @mcp.tool()
 async def search_tools(keyword: str = "") -> str:
-    """Search for security tools by keyword."""
+    """Search for tools by keyword."""
     if not keyword.strip():
-        return "❌ Error: Search keyword is required"
+        return "❌ Error: keyword is required"
     
+    # Ensure tools are discovered
     if not AVAILABLE_TOOLS:
         initialize_tools()
     
-    keyword_lower = keyword.lower()
-    matches = [(name, cat) for name, cat in AVAILABLE_TOOLS.items() if keyword_lower in name.lower()]
+    keyword = keyword.lower()
+    matching_tools = []
     
-    output = f"🔍 **Search Results for '{keyword}' ({len(matches)} found):**\n\n"
+    for tool_name, category in AVAILABLE_TOOLS.items():
+        if keyword in tool_name.lower() or keyword in category.lower():
+            matching_tools.append((tool_name, category))
     
-    if matches:
-        for tool_name, category in sorted(matches)[:20]:
-            output += f"  - `{tool_name}` ({category})\n"
-        if len(matches) > 20:
-            output += f"  - ... and {len(matches) - 20} more matches\n"
-    else:
-        output += "No tools found.\n"
+    if not matching_tools:
+        return f"❌ No tools found matching '{keyword}'. Try a different keyword."
     
+    output = f"🔍 **Tools matching '{keyword}':**\n\n"
+    
+    # Group by category
+    by_category = {}
+    for tool_name, category in matching_tools:
+        if category not in by_category:
+            by_category[category] = []
+        by_category[category].append(tool_name)
+    
+    for category, tools in sorted(by_category.items()):
+        output += f"**{category}** ({len(tools)} tools):\n"
+        for tool_name in sorted(tools):
+            output += f"  - `{tool_name}`\n"
+        output += "\n"
+    
+    output += f"\n💡 Use `run_command(command_name='tool_name', args='--help')` for tool details"
     return output
 
 @mcp.tool()
 async def container_status() -> str:
-    """Check status of Kali containers and Docker setup."""
-    try:
-        ps_cmd = f"docker ps --filter name={CONTAINER_PREFIX} --format 'table {{{{.Names}}}}\\t{{{{.Status}}}}'"
-        result = subprocess.run(ps_cmd, shell=True, capture_output=True, text=True)
-        
-        output = "🐳 **Container Status:**\n\n"
-        
-        if result.returncode == 0 and result.stdout.strip():
-            output += result.stdout
-        else:
-            output += "No Kali security containers currently running.\n"
-        
-        output += f"\n**Configuration:**\n"
-        output += f"- Discovered Tools: {len(AVAILABLE_TOOLS)}\n"
-        output += f"- Categories: {len(TOOL_CATEGORIES)}\n"
-        
-        if DISCOVERY_INFO:
-            output += f"\n**Discovery Info:**\n"
-            output += f"- Time: {DISCOVERY_INFO.get('discovery_time_seconds', 'N/A')}s\n"
-            output += f"- Binaries Scanned: {DISCOVERY_INFO.get('binaries_found', 'N/A')}\n"
-        
-        return output
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
-
-@mcp.tool()
-async def refresh_tool_discovery() -> str:
-    """Force refresh of tool discovery."""
-    logger.info("🔄 Forcing tool discovery refresh...")
+    """Get current container status and discovery information."""
+    # Ensure tools are discovered
+    if not AVAILABLE_TOOLS:
+        initialize_tools()
     
-    try:
-        discovery_result = discover_kali_tools_optimized(force_refresh=True)
-        
-        if discovery_result["tools"]:
-            output = f"✅ **Discovery Refreshed!**\n\n"
-            output += f"**Total Tools:** {len(discovery_result['tools'])}\n"
-            output += f"**Categories:** {len(discovery_result['categories'])}\n"
-            output += f"**Time:** {discovery_result['discovery_info'].get('discovery_time_seconds', 'N/A')}s\n"
-            return output
-        else:
-            return "❌ Tool discovery failed."
-        
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
+    output = f"🐳 **Kali Security Container Status:**\n\n"
+    output += f"**Status:** ✅ Running directly (no Docker needed)\n"
+    output += f"**Execution Mode:** Direct command execution\n"
+    output += f"**Discovered Tools:** {len(AVAILABLE_TOOLS)}\n"
+    output += f"**Categories:** {len(TOOL_CATEGORIES)}\n"
+    
+    if DISCOVERY_INFO:
+        output += f"\n**Discovery Info:**\n"
+        output += f"- Binaries Scanned: {DISCOVERY_INFO.get('binaries_found', 'N/A')}\n"
+        output += f"- Tools Categorized: {DISCOVERY_INFO.get('tools_categorized', 'N/A')}\n"
+        output += f"- Discovery Time: {DISCOVERY_INFO.get('discovery_time_seconds', 'N/A')}s\n"
+    
+    if TOOL_CATEGORIES:
+        output += f"\n**Categories Breakdown:**\n"
+        for cat, tools in sorted(TOOL_CATEGORIES.items()):
+            output += f"- {cat}: {len(tools)} tools\n"
+    
+    output += f"\n💡 **Tip:** This container runs commands directly - no additional Docker overhead!"
+    return output
 
 # === SERVER STARTUP ===
 if __name__ == "__main__":
-    logger.info("🚀 Starting Kali Linux Security MCP Server (Unified Command Runner)...")
-    logger.warning("⚠️ Educational purposes only!")
+    logger.info("🚀 Starting Kali Linux Security MCP Server (Direct Execution Version)...")
     
-    # Initialize tool discovery
+    # Initialize tools on startup
     initialize_tools()
+    logger.info(f"📊 Loaded {len(AVAILABLE_TOOLS)} tools in {len(TOOL_CATEGORIES)} categories")
     
     try:
         mcp.run(transport='stdio')
