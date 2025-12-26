@@ -492,14 +492,14 @@ create_custom_catalog() {
   # Ensure catalogs directory exists
   mkdir -p "$(dirname "$KALI_CATALOG_FILE")"
 
-  # Create the catalog YAML file
+  # Create the catalog YAML file with unified command runner format
   cat >"$KALI_CATALOG_FILE" <<'EOF'
 version: 2
 name: kali-security
 displayName: Kali Linux Security Tools
 registry:
   kali-security:
-    description: "Dynamic Kali Linux security server with 600+ tools including nmap, metasploit, nikto, sqlmap, and more. Each tool runs in fresh isolated containers."
+    description: "Dynamic Kali Linux security server with 600+ tools including nmap, metasploit, nikto, sqlmap, and more. Each tool runs in fresh isolated containers using unified command runner approach."
     title: "Kali Linux Security Tools"
     type: server
     dateAdded: "2025-12-23T00:00:00Z"
@@ -511,6 +511,8 @@ registry:
     upstream: ""
     icon: "https://www.kali.org/images/kali-logo.svg"
     tools:
+      - name: run_command
+        description: "Execute any security command by name with arguments"
       - name: list_security_tools
         description: "List all 600+ available security tools by category"
       - name: get_tool_info
@@ -521,10 +523,10 @@ registry:
         description: "Check status of Kali containers and Docker setup"
       - name: refresh_tool_discovery
         description: "Force refresh tool discovery to find new tools"
-      - name: get_tool_metadata
-        description: "Get detailed metadata (version, package, size) for a tool"
-      - name: install_tool
-        description: "Install additional security tools in the Kali image"
+      - name: get_command_info
+        description: "Get detailed information about a specific command including parameters"
+      - name: list_commands
+        description: "List all available commands, optionally filtered by category"
     secrets:
       - name: KALI_TARGET_TIMEOUT
         env: KALI_TARGET_TIMEOUT
