@@ -90,6 +90,9 @@ cleanup_all() {
   # Remove catalog
   print_status "Removing catalog files..."
   rm -f "$CATALOGS_DIR/kali-security.yaml"
+  
+  # Remove catalog from Docker MCP
+  docker mcp catalog remove "$KALI_CATALOG_NAME" 2>/dev/null || true
 
   # Disable server
   print_status "Disabling MCP server..."
@@ -136,12 +139,24 @@ check_existing_setup() {
     print_warning "✗ Tool discovery cache not found - will discover"
   fi
 
-  # Check if catalog exists
+  # Check if catalog exists (both file and import)
+  local catalog_imported=false
   if docker mcp catalog show "$KALI_CATALOG_NAME" &>/dev/null; then
-    print_success "✓ Catalog imported in Docker MCP"
+    catalog_imported=true
+  fi
+  
+  if [ -f "$KALI_CATALOG_FILE" ] && [ "$catalog_imported" = true ]; then
+    print_success "✓ Catalog file exists and is imported in Docker MCP"
     catalog_exists=true
+  elif [ -f "$KALI_CATALOG_FILE" ]; then
+    print_warning "✓ Catalog file exists but not imported - will import"
+    catalog_exists=false
+  elif [ "$catalog_imported" = true ]; then
+    print_warning "✗ Catalog imported but file missing - will recreate"
+    catalog_exists=false
   else
-    print_warning "✗ Catalog not imported - will create"
+    print_warning "✗ Catalog not found - will create"
+    catalog_exists=false
   fi
 
   # Check if server is enabled
@@ -482,8 +497,8 @@ print(f'WARMUP_COMPLETE:{len(result[\"tools\"])}')
 # Function to create custom catalog
 create_custom_catalog() {
   print_status "Checking catalog status..."
-  if docker mcp catalog show "$KALI_CATALOG_NAME" &>/dev/null; then
-    print_success "Catalog already imported - skipping"
+  if docker mcp catalog show "$KALI_CATALOG_NAME" &>/dev/null && [ -f "$KALI_CATALOG_FILE" ]; then
+    print_success "Catalog already imported and file exists - skipping"
     return 0
   fi
 
@@ -568,6 +583,15 @@ EOF
   print_status "Importing catalog into Docker MCP..."
   if docker mcp catalog import "$KALI_CATALOG_FILE"; then
     print_success "Catalog imported successfully"
+    
+    # Verify the catalog was imported
+    if docker mcp catalog show "$KALI_CATALOG_NAME" &>/dev/null; then
+      print_success "Catalog verification passed"
+    else
+      print_error "Catalog import claimed success but verification failed"
+      print_error "Manual verification: docker mcp catalog show $KALI_CATALOG_NAME"
+      exit 1
+    fi
   else
     print_error "Failed to import catalog"
     print_error "Manual import: docker mcp catalog import $KALI_CATALOG_FILE"
