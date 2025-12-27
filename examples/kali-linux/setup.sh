@@ -321,10 +321,17 @@ create_directories() {
 
 # Function to build Docker image
 build_docker_image() {
-  # Check if base image already exists
-  if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "kali-security-mcp-server:latest"; then
+  # Skip build if image exists AND we're not cleaning or forcing
+  if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "kali-security-mcp-server:latest" && 
+     [ "$CLEAN_SETUP" != "true" ] && [ "$FORCE_REBUILD" != "true" ]; then
     print_status "Base image already exists - skipping build"
     return 0
+  fi
+
+  # Remove existing image if forcing rebuild
+  if [ "$FORCE_REBUILD" = "true" ] || [ "$CLEAN_SETUP" = "true" ]; then
+    print_status "Removing existing image due to --force or --clean flag"
+    docker rmi kali-security-mcp-server:latest 2>/dev/null || true
   fi
 
   print_status "Building Kali Linux Security MCP Server image..."

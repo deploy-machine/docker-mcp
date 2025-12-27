@@ -80,12 +80,12 @@ COPY tool_discovery.sh .
 # Make discovery script executable
 RUN chmod +x tool_discovery.sh
 
-# Create non-root user
+# Create non-root user but keep as root for security tools
 RUN useradd -m -u 1000 mcpuser && \
     chown -R mcpuser:mcpuser /app
 
-# Switch to non-root user
-USER mcpuser
+# Stay as root for security tools that require privileges
+# USER mcpuser
 
 # Update PATH to include virtual environment
 ENV PATH="/opt/venv/bin:$PATH"
